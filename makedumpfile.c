@@ -21,6 +21,7 @@
 #include "erase_info.h"
 #include "sadump_info.h"
 #include "kallsyms_info.h"
+#include "btf_info.h"
 #include "cache.h"
 #include <stddef.h>
 #include <ctype.h>
@@ -4688,9 +4689,16 @@ out:
 			set_nr_cpus(online_cpus);
 		}
 
-		if (load_kallsyms())
+		if (load_kallsyms()) {
 			fprintf(stderr, "kallsyms: slab_caches = 0x%zx\n",
 				kallsyms_lookup("slab_caches"));
+			if (load_btf()) {
+				fprintf(stderr, "btf: offset of task_struct.tasks.prev: %d\n",
+					btf_offset("task_struct", "tasks.prev"));
+				fprintf(stderr, "btf: offset of page.callback_head: %d\n",
+					btf_offset("page", "callback_head"));
+			}
+		}
 
 
 		if (!check_release())
