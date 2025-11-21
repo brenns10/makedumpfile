@@ -1856,6 +1856,13 @@ struct symbol_table {
 	unsigned long long	node_remap_end_vaddr;
 	unsigned long long	node_remap_start_pfn;
 	unsigned long long      free_huge_page;
+	unsigned long long	kallsyms_names;
+	unsigned long long	kallsyms_token_table;
+	unsigned long long	kallsyms_token_index;
+	unsigned long long	kallsyms_num_syms;
+	unsigned long long	kallsyms_offsets;
+	unsigned long long	kallsyms_relative_base;
+	unsigned long long	kallsyms_addresses;
 
 	/*
 	 * for Xen extraction

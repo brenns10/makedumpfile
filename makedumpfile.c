@@ -20,6 +20,7 @@
 #include "elf_info.h"
 #include "erase_info.h"
 #include "sadump_info.h"
+#include "kallsyms_info.h"
 #include "cache.h"
 #include <stddef.h>
 #include <ctype.h>
@@ -2847,6 +2848,13 @@ read_vmcoreinfo(void)
 	READ_SYMBOL("demote_segment_4k", demote_segment_4k);
 	READ_SYMBOL("cur_cpu_spec", cur_cpu_spec);
 	READ_SYMBOL("free_huge_page", free_huge_page);
+	READ_SYMBOL("kallsyms_names", kallsyms_names);
+	READ_SYMBOL("kallsyms_token_table", kallsyms_token_table);
+	READ_SYMBOL("kallsyms_token_index", kallsyms_token_index);
+	READ_SYMBOL("kallsyms_num_syms", kallsyms_num_syms);
+	READ_SYMBOL("kallsyms_offsets", kallsyms_offsets);
+	READ_SYMBOL("kallsyms_relative_base", kallsyms_relative_base);
+	READ_SYMBOL("kallsyms_addresses", kallsyms_addresses);
 
 	READ_STRUCTURE_SIZE("page", page);
 	READ_STRUCTURE_SIZE("mem_section", mem_section);
@@ -4679,6 +4687,11 @@ out:
 
 			set_nr_cpus(online_cpus);
 		}
+
+		if (load_kallsyms())
+			fprintf(stderr, "kallsyms: slab_caches = 0x%zx\n",
+				kallsyms_lookup("slab_caches"));
+
 
 		if (!check_release())
 			return FALSE;
