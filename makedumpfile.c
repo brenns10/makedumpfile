@@ -4675,6 +4675,15 @@ out:
 	if (is_xen_memory() && !get_dom0_mapnr())
 		return FALSE;
 
+	if (debug_info && info->flag_retain_user_stacks) {
+		if (!load_kallsyms())
+			ERRMSG("failed to load kallsyms\n");
+		else if (!load_btf())
+			ERRMSG("failed to load BTF\n");
+		else if (!load_task_stacks())
+			ERRMSG("failed to load task_stacks\n");
+	}
+
 	if (debug_info) {
 		if (info->flag_sadump)
 			(void) sadump_virt_phys_base();
@@ -4687,17 +4696,6 @@ out:
 				return FALSE;
 
 			set_nr_cpus(online_cpus);
-		}
-
-		if (load_kallsyms()) {
-			fprintf(stderr, "kallsyms: slab_caches = 0x%zx\n",
-				kallsyms_lookup("slab_caches"));
-			if (load_btf()) {
-				fprintf(stderr, "btf: offset of task_struct.tasks.prev: %d\n",
-					btf_offset("task_struct", "tasks.prev"));
-				fprintf(stderr, "btf: offset of page.callback_head: %d\n",
-					btf_offset("page", "callback_head"));
-			}
 		}
 
 
@@ -6475,7 +6473,7 @@ __exclude_unnecessary_pages(unsigned long mem_map,
 	unsigned char *pcache;
 	unsigned int _count, _mapcount = 0, compound_order = 0;
 	unsigned int order_offset, dtor_offset;
-	unsigned long flags, mapping, private = 0;
+	unsigned long flags, mapping, index, private = 0;
 	unsigned long compound_dtor, compound_head = 0;
 
 	/*
@@ -6552,6 +6550,8 @@ __exclude_unnecessary_pages(unsigned long mem_map,
 		flags   = ULONG(pcache + OFFSET(page.flags));
 		_count  = UINT(pcache + OFFSET(page._refcount));
 		mapping = ULONG(pcache + OFFSET(page.mapping));
+		if (OFFSET(page.index) >= 0)
+			index   = ULONG(pcache + OFFSET(page.index));
 
 		if (OFFSET(page._mapcount) != NOT_FOUND_STRUCTURE)
 			_mapcount = UINT(pcache + OFFSET(page._mapcount));
@@ -6690,7 +6690,8 @@ check_order:
 		 *  - hugetlbfs pages
 		 */
 		else if ((info->dump_level & DL_EXCLUDE_USER_DATA)
-			 && (isAnon(mapping, flags, _mapcount) || isHugetlb(compound_dtor))) {
+			 && ((isAnon(mapping, flags, _mapcount) && !retain_anon_vma(mapping, index))
+			     || isHugetlb(compound_dtor))) {
 			pfn_counter = &pfn_user;
 		}
 		/*
@@ -12148,6 +12149,7 @@ static struct option longopts[] = {
 	{"check-params", no_argument, NULL, OPT_CHECK_PARAMS},
 	{"dry-run", no_argument, NULL, OPT_DRY_RUN},
 	{"show-stats", no_argument, NULL, OPT_SHOW_STATS},
+	{"retain-user-stacks", no_argument, NULL, OPT_RETAIN_USER_STACKS},
 	{0, 0, 0, 0}
 };
 
@@ -12334,6 +12336,9 @@ main(int argc, char *argv[])
 			break;
 		case OPT_SHOW_STATS:
 			flag_show_stats = TRUE;
+			break;
+		case OPT_RETAIN_USER_STACKS:
+			info->flag_retain_user_stacks = TRUE;
 			break;
 		case '?':
 			MSG("Commandline parameter is invalid.\n");

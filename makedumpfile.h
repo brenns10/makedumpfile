@@ -1548,6 +1548,7 @@ struct DumpInfo {
 	int		flag_excludevm;      /* -e - excluding unused vmemmap pages */
 	int		flag_use_count;      /* _refcount is named _count in struct page */
 	int		flag_dry_run;        /* do not create a vmcore file */
+	int		flag_retain_user_stacks; /* do not filter anon pages in user stacks */
 	unsigned long	vaddr_for_vtop;      /* virtual address for debugging */
 	long		page_size;           /* size of page */
 	long		page_shift;
@@ -1993,6 +1994,7 @@ struct offset_table {
 		long	compound_dtor;
 		long	compound_order;
 		long	compound_head;
+		long	index;
 	} page;
 	struct folio {
 		long	_folio_dtor;
@@ -2743,6 +2745,7 @@ struct elf_prstatus {
 #define OPT_CHECK_PARAMS        OPT_START+18
 #define OPT_DRY_RUN             OPT_START+19
 #define OPT_SHOW_STATS          OPT_START+20
+#define OPT_RETAIN_USER_STACKS  OPT_START+21
 
 /*
  * Function Prototype.
@@ -2773,5 +2776,9 @@ int write_and_check_space(int fd, void *buf, size_t buf_size,
 int open_dump_file(void);
 int dump_lockless_dmesg(void);
 unsigned long long memparse(char *ptr, char **retptr);
+
+
+int load_task_stacks(void);
+int retain_anon_vma(unsigned long long mapping, unsigned long long index);
 
 #endif /* MAKEDUMPFILE_H */
