@@ -3,6 +3,7 @@
 #include <string.h>
 #include "makedumpfile.h"
 #include "kallsyms.h"
+#include "btf_info.h"
 
 static uint32_t *kallsyms_offsets = NULL;
 static uint16_t *kallsyms_token_index = NULL;
@@ -352,4 +353,113 @@ out:
 	if (kallsyms_names)
 		free(kallsyms_names);
 	return ret;
+}
+
+INIT_KERN_SYM(modules);
+
+INIT_KERN_STRUCT_MEMBER(list_head, next);
+INIT_KERN_STRUCT_MEMBER(module, list);
+INIT_KERN_STRUCT_MEMBER(module, name);
+INIT_KERN_STRUCT_MEMBER(module, core_kallsyms);
+INIT_KERN_STRUCT_MEMBER(mod_kallsyms, symtab);
+INIT_KERN_STRUCT_MEMBER(mod_kallsyms, num_symtab);
+INIT_KERN_STRUCT_MEMBER(mod_kallsyms, strtab);
+INIT_KERN_STRUCT_MEMBER(elf64_sym, st_name);
+INIT_KERN_STRUCT_MEMBER(elf64_sym, st_value);
+
+#define MEMBER_OFF(S, M) \
+	GET_KERN_STRUCT_MEMBER_MOFF(S, M) / 8
+
+uint64_t next_list(uint64_t list)
+{
+	uint64_t next = 0;
+
+	readmem(VADDR, list + MEMBER_OFF(list_head, next),
+		&next, GET_KERN_STRUCT_MEMBER_MSIZE(list_head, next));
+	return next;
+}
+
+bool init_module_kallsyms(void)
+{
+	uint64_t modules, list, value = 0, symtab = 0, strtab = 0;
+	uint32_t st_name = 0;
+	int num_symtab, i, j;
+	struct ksym_info **p;
+	char symname[512], ch;
+	char *modname = NULL;
+	bool ret = false;
+
+	modules = GET_KERN_SYM(modules);
+	if (!modules) {
+		/* Not a failure if no module enabled */
+		ret = true;
+		goto out;
+	}
+
+	modname = (char *)malloc(GET_KERN_STRUCT_MEMBER_MSIZE(module, name));
+	if (!modname)
+		goto no_mem;
+
+	for (list = next_list(modules); list != modules; list = next_list(list)) {
+		readmem(VADDR, list - MEMBER_OFF(module, list) +
+				MEMBER_OFF(module, name),
+			modname, GET_KERN_STRUCT_MEMBER_MSIZE(module, name));
+		if (!check_ksyms_require_modname(modname, NULL))
+			continue;
+		readmem(VADDR, list - MEMBER_OFF(module, list) +
+				MEMBER_OFF(module, core_kallsyms) +
+				MEMBER_OFF(mod_kallsyms, num_symtab),
+			&num_symtab, GET_KERN_STRUCT_MEMBER_MSIZE(mod_kallsyms, num_symtab));
+		readmem(VADDR, list - MEMBER_OFF(module, list) +
+				MEMBER_OFF(module, core_kallsyms) +
+				MEMBER_OFF(mod_kallsyms, symtab),
+			&symtab, GET_KERN_STRUCT_MEMBER_MSIZE(mod_kallsyms, symtab));
+		readmem(VADDR, list - MEMBER_OFF(module, list) +
+				MEMBER_OFF(module, core_kallsyms) +
+				MEMBER_OFF(mod_kallsyms, strtab),
+			&strtab, GET_KERN_STRUCT_MEMBER_MSIZE(mod_kallsyms, strtab));
+		for (i = 0; i < num_symtab; i++) {
+			j = 0;
+			readmem(VADDR, symtab + i * GET_KERN_STRUCT_MEMBER_SSIZE(elf64_sym, st_value) +
+					MEMBER_OFF(elf64_sym, st_value),
+				&value, GET_KERN_STRUCT_MEMBER_MSIZE(elf64_sym, st_value));
+			readmem(VADDR, symtab + i * GET_KERN_STRUCT_MEMBER_SSIZE(elf64_sym, st_name) +
+					MEMBER_OFF(elf64_sym, st_name),
+				&st_name, GET_KERN_STRUCT_MEMBER_MSIZE(elf64_sym, st_name));
+			do {
+				readmem(VADDR, strtab + st_name + j++, &ch, 1);
+			} while (ch != '\0');
+			if (j == 1 || j > sizeof(symname))
+				/* Skip empty or too long string */
+				continue;
+			readmem(VADDR, strtab + st_name, symname, j);
+			if (is_unwanted_symbol(symname))
+				continue;
+
+			for (j = 0; j < sr_len; j++) {
+				for (p = (struct ksym_info **)(sr[j]->start);
+				     p < (struct ksym_info **)(sr[j]->stop);
+				     p++) {
+					if (!strcmp((*p)->modname, modname) &&
+					    !strcmp((*p)->symname, symname)) {
+						(*p)->value = value;
+					}
+				}
+			}
+		}
+	}
+	ret = true;
+	goto out;
+no_mem:
+	fprintf(stderr, "%s: Not enough memory!\n", __func__);
+out:
+	if (modname)
+		free(modname);
+	return ret;
+}
+
+void cleanup_kallsyms(void)
+{
+	cleanup_ksyms_section_range();
+	cleanup_ksyms_modname();
 }
