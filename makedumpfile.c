@@ -10847,6 +10847,8 @@ update_dump_level(void)
 	}
 }
 
+void run_extensions(void);
+
 int
 create_dumpfile(void)
 {
@@ -10883,6 +10885,8 @@ create_dumpfile(void)
 retry:
 	if (info->flag_refiltering)
 		update_dump_level();
+
+	run_extensions();
 
 	if ((info->name_filterconfig || info->name_eppic_config)
 			&& !gather_filter_info())
@@ -12130,6 +12134,7 @@ static struct option longopts[] = {
 	{"check-params", no_argument, NULL, OPT_CHECK_PARAMS},
 	{"dry-run", no_argument, NULL, OPT_DRY_RUN},
 	{"show-stats", no_argument, NULL, OPT_SHOW_STATS},
+	{"extension", required_argument, NULL, OPT_EXTENSION},
 	{0, 0, 0, 0}
 };
 
@@ -12316,6 +12321,9 @@ main(int argc, char *argv[])
 			break;
 		case OPT_SHOW_STATS:
 			flag_show_stats = TRUE;
+			break;
+		case OPT_EXTENSION:
+			add_extension_opts(optarg);
 			break;
 		case '?':
 			MSG("Commandline parameter is invalid.\n");

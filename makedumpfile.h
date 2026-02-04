@@ -2747,6 +2747,7 @@ struct elf_prstatus {
 #define OPT_CHECK_PARAMS        OPT_START+18
 #define OPT_DRY_RUN             OPT_START+19
 #define OPT_SHOW_STATS          OPT_START+20
+#define OPT_EXTENSION           OPT_START+21
 
 /*
  * Function Prototype.
@@ -2777,5 +2778,6 @@ int write_and_check_space(int fd, void *buf, size_t buf_size,
 int open_dump_file(void);
 int dump_lockless_dmesg(void);
 unsigned long long memparse(char *ptr, char **retptr);
+void add_extension_opts(char *opt);
 
 #endif /* MAKEDUMPFILE_H */
