@@ -102,6 +102,7 @@ mdf_pfn_t pfn_free;
 mdf_pfn_t pfn_hwpoison;
 mdf_pfn_t pfn_offline;
 mdf_pfn_t pfn_elf_excluded;
+mdf_pfn_t pfn_extension;
 
 mdf_pfn_t num_dumped;
 
@@ -6459,6 +6460,8 @@ __exclude_unnecessary_pages(unsigned long mem_map,
 	unsigned int order_offset, dtor_offset;
 	unsigned long flags, mapping, private = 0;
 	unsigned long compound_dtor, compound_head = 0;
+	struct ft_page_info *cur_discard = NULL;
+	struct ft_page_info *cur_keep = NULL;
 
 	/*
 	 * If a multi-page exclusion is pending, do it first
@@ -6493,6 +6496,13 @@ __exclude_unnecessary_pages(unsigned long mem_map,
 		 * If this pfn doesn't belong to target region, skip this pfn.
 		 */
 		if (info->flag_cyclic && !is_cyclic_region(pfn, cycle))
+			continue;
+
+		/*
+		 * Keep pages that specified by user via
+		 * makedumpfile extensions
+		 */
+		if (filter_page(pfn, &cur_keep, false))
 			continue;
 
 		/*
@@ -6688,6 +6698,14 @@ check_order:
 			pfn_counter = &pfn_offline;
 		}
 		/*
+		 * Exclude pages that specified by user via
+		 * makedumpfile extensions
+		 */
+		else if (filter_page(pfn, &cur_discard, true)) {
+			nr_pages = 1;
+			pfn_counter = &pfn_extension;
+		}
+		/*
 		 * Unexcludable page
 		 */
 		else
@@ -6748,6 +6766,7 @@ exclude_unnecessary_pages(struct cycle *cycle)
 		print_progress(PROGRESS_UNN_PAGES, info->num_mem_map, info->num_mem_map, NULL);
 		print_execution_time(PROGRESS_UNN_PAGES, &ts_start);
 	}
+	cleanup_filter_pages_info();
 
 	return TRUE;
 }
@@ -8234,7 +8253,7 @@ write_elf_pages_cyclic(struct cache_data *cd_header, struct cache_data *cd_page)
 	 */
 	if (info->flag_cyclic) {
 		pfn_zero = pfn_cache = pfn_cache_private = 0;
-		pfn_user = pfn_free = pfn_hwpoison = pfn_offline = 0;
+		pfn_user = pfn_free = pfn_hwpoison = pfn_offline = pfn_extension = 0;
 		pfn_memhole = info->max_mapnr;
 	}
 
@@ -9579,7 +9598,7 @@ write_kdump_pages_and_bitmap_cyclic(struct cache_data *cd_header, struct cache_d
 		 * Reset counter for debug message.
 		 */
 		pfn_zero = pfn_cache = pfn_cache_private = 0;
-		pfn_user = pfn_free = pfn_hwpoison = pfn_offline = 0;
+		pfn_user = pfn_free = pfn_hwpoison = pfn_offline = pfn_extension = 0;
 		pfn_memhole = info->max_mapnr;
 
 		/*
@@ -10528,7 +10547,7 @@ print_report(void)
 	pfn_original = info->max_mapnr - pfn_memhole;
 
 	pfn_excluded = pfn_zero + pfn_cache + pfn_cache_private
-	    + pfn_user + pfn_free + pfn_hwpoison + pfn_offline;
+	    + pfn_user + pfn_free + pfn_hwpoison + pfn_offline + pfn_extension;
 
 	REPORT_MSG("\n");
 	REPORT_MSG("Original pages  : 0x%016llx\n", pfn_original);
@@ -10544,6 +10563,7 @@ print_report(void)
 	REPORT_MSG("    Free pages              : 0x%016llx\n", pfn_free);
 	REPORT_MSG("    Hwpoison pages          : 0x%016llx\n", pfn_hwpoison);
 	REPORT_MSG("    Offline pages           : 0x%016llx\n", pfn_offline);
+	REPORT_MSG("    Extension filter pages  : 0x%016llx\n", pfn_extension);
 	REPORT_MSG("  Remaining pages  : 0x%016llx\n",
 	    pfn_original - pfn_excluded);
 
@@ -10584,7 +10604,7 @@ print_mem_usage(void)
 	pfn_original = info->max_mapnr - pfn_memhole;
 
 	pfn_excluded = pfn_zero + pfn_cache + pfn_cache_private
-	    + pfn_user + pfn_free + pfn_hwpoison + pfn_offline;
+	    + pfn_user + pfn_free + pfn_hwpoison + pfn_offline + pfn_extension;
 	shrinking = (pfn_original - pfn_excluded) * 100;
 	shrinking = shrinking / pfn_original;
 	total_size = info->page_size * pfn_original;

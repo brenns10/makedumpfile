@@ -2466,3 +2466,101 @@ get_size_eraseinfo(void)
 	return size_eraseinfo;
 }
 
+/* Pages to be discarded */
+static struct ft_page_info *ft_head_discard = NULL;
+/* Pages to be keeped */
+static struct ft_page_info *ft_head_keep = NULL;
+
+/*
+ * Insert the ft_page_info blocks into ft_head by ascending pfn.
+ */
+bool
+update_filter_pages_info(unsigned long pfn, unsigned long num, bool to_discard)
+{
+	struct ft_page_info *p, **ft_head;
+	struct ft_page_info *new_p = malloc(sizeof(struct ft_page_info));
+
+	ft_head = to_discard ? &ft_head_discard : &ft_head_keep;
+
+	if (!new_p) {
+		ERRMSG("Can't allocate memory for ft_page_info at %lx\n", pfn);
+		return false;
+	}
+	new_p->pfn = pfn;
+	new_p->num = num;
+	new_p->next = NULL;
+
+	if (!(*ft_head) || (*ft_head)->pfn > new_p->pfn) {
+		new_p->next = (*ft_head);
+		(*ft_head) = new_p;
+		return true;
+	}
+
+	p = (*ft_head);
+	while (p->next != NULL && p->next->pfn < new_p->pfn) {
+		p = p->next;
+	}
+
+	new_p->next = p->next;
+	p->next = new_p;
+	return true;
+}
+
+/*
+ * Check if the pfn hit ft_page_info block.
+ *
+ * pfn and ft_head are in ascending order, so save the current ft_page_info
+ * block into **p because it is likely to hit again next time.
+ */
+bool
+filter_page(unsigned long pfn, struct ft_page_info **p, bool handle_discard)
+{
+	struct ft_page_info *ft_head;
+
+	ft_head = handle_discard ? ft_head_discard : ft_head_keep;
+
+	if (ft_head == NULL)
+		return false;
+
+	if (*p == NULL)
+		*p = ft_head;
+
+	/* The gap before 1st block */
+	if (pfn >= 0 && pfn < ft_head->pfn)
+		return false;
+
+	/* Handle 1~(n-1) blocks and following gaps */
+	while ((*p)->next) {
+		if (pfn >= (*p)->pfn && pfn < (*p)->pfn + (*p)->num)
+			return true; // hit the block
+		if (pfn >= (*p)->pfn + (*p)->num && pfn < (*p)->next->pfn)
+			return false; // the gap after the block
+		*p = (*p)->next;
+	}
+
+	/* The last block and gap */
+	if (pfn >= (*p)->pfn + (*p)->num)
+		return false;
+	else
+		return true;
+}
+
+static void
+do_cleanup(struct ft_page_info **ft_head)
+{
+	struct ft_page_info *p, *p_tmp;
+
+	for (p = *ft_head; p;) {
+		p_tmp = p;
+		p = p->next;
+		free(p_tmp);
+	}
+	*ft_head = NULL;
+}
+
+void
+cleanup_filter_pages_info(void)
+{
+	do_cleanup(&ft_head_discard);
+	do_cleanup(&ft_head_keep);
+}

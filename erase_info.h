@@ -20,6 +20,7 @@
 #define _ERASE_INFO_H
 
 #define MAX_SIZE_STR_LEN (26)
+#include <stdbool.h>
 
 /*
  * Erase information, original symbol expressions.
@@ -64,6 +65,17 @@ void filter_data_buffer_parallel(unsigned char *buf, unsigned long long paddr,
 					size_t size, pthread_mutex_t *mutex);
 unsigned long get_size_eraseinfo(void);
 int update_filter_info_raw(unsigned long long, int, int);
+
+bool update_filter_pages_info(unsigned long, unsigned long, bool);
+
+struct ft_page_info {
+	unsigned long pfn;
+	unsigned long num;
+	struct ft_page_info *next;
+} __attribute__((packed));
+
+bool filter_page(unsigned long, struct ft_page_info **p, bool handle_discard);
+void cleanup_filter_pages_info(void);
 
 #endif /* _ERASE_INFO_H */
 
