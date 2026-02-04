@@ -235,3 +235,102 @@ out:
 		free(buf);
 	return ret;
 }
+
+INIT_KERN_SYM(btf_modules);
+
+INIT_KERN_STRUCT_MEMBER(btf_module, list);
+INIT_KERN_STRUCT_MEMBER(btf_module, btf);
+INIT_KERN_STRUCT_MEMBER(btf_module, module);
+DECLARE_KERN_STRUCT_MEMBER(module, name);
+INIT_KERN_STRUCT_MEMBER(btf, data);
+INIT_KERN_STRUCT_MEMBER(btf, data_size);
+
+#define MEMBER_OFF(S, M) \
+	GET_KERN_STRUCT_MEMBER_MOFF(S, M) / 8
+
+bool init_module_btf(void)
+{
+	struct btf *btf_mod;
+	uint64_t btf_modules, list;
+	uint64_t btf = 0, data = 0, module = 0;
+	int data_size = 0;
+	bool ret = false;
+	char *btf_buf = NULL;
+	char *modname = NULL;
+	struct ktype_info **p;
+
+	btf_modules = GET_KERN_SYM(btf_modules);
+	if (!btf_modules)
+		/* Maybe module is not enabled, this is not an error */
+		return true;
+
+	modname = (char *)malloc(GET_KERN_STRUCT_MEMBER_MSIZE(module, name));
+	if (!modname)
+		goto no_mem;
+
+	for (list = next_list(btf_modules); list != btf_modules; list = next_list(list)) {
+		readmem(VADDR, list - MEMBER_OFF(btf_module, list) +
+				MEMBER_OFF(btf_module, btf),
+			&btf, GET_KERN_STRUCT_MEMBER_MSIZE(btf_module, btf));
+		readmem(VADDR, list - MEMBER_OFF(btf_module, list) +
+				MEMBER_OFF(btf_module, module),
+			&module, GET_KERN_STRUCT_MEMBER_MSIZE(btf_module, module));
+		readmem(VADDR, module + MEMBER_OFF(module, name),
+			modname, GET_KERN_STRUCT_MEMBER_MSIZE(module, name));
+		if (!check_ktypes_require_modname(modname, NULL)) {
+			continue;
+		}
+		readmem(VADDR, btf + MEMBER_OFF(btf, data),
+			&data, GET_KERN_STRUCT_MEMBER_MSIZE(btf, data));
+		readmem(VADDR, btf + MEMBER_OFF(btf, data_size),
+			&data_size, GET_KERN_STRUCT_MEMBER_MSIZE(btf, data_size));
+		btf_buf = (char *)malloc(data_size);
+		if (!btf_buf)
+			goto no_mem;
+		readmem(VADDR, data, btf_buf, data_size);
+		btf_mod = btf__new_split(btf_buf, data_size, btf_arr[0]->btf);
+		free(btf_buf);
+		if (libbpf_get_error(btf_mod) != 0 ||
+		    add_to_btf_arr(btf_mod, strdup(modname)) == false) {
+			fprintf(stderr, "%s: init %s btf fail\n", __func__, modname);
+			goto out;
+		}
+	}
+
+	/* OK, we have loaded all needed modules's btf, now resolve the types */
+	for (int i = 0; i < sr_len; i++) {
+		for (p = (struct ktype_info **)(sr[i]->start);
+		     p < (struct ktype_info **)(sr[i]->stop);
+		     p++)
+			if (get_ktype_info(*p, NULL) == false)
+				goto out;
+	}
+
+	ret = true;
+	goto out;
+
+no_mem:
+	fprintf(stderr, "%s: Not enough memory!\n", __func__);
+out:
+	if (modname)
+		free(modname);
+	return ret;
+}
+
+static void cleanup_btf_arr(void)
+{
+	for (int i = 0; i < btf_arr_len; i++) {
+		free(btf_arr[i]->module);
+		btf__free(btf_arr[i]->btf);
+		free(btf_arr[i]);
+	}
+	if (btf_arr)
+		free(btf_arr);
+}
+
+void cleanup_btf(void)
+{
+	cleanup_btf_arr();
+	cleanup_ktypes_section_range();
+	cleanup_ktypes_modname();
+}
