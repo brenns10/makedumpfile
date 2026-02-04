@@ -1,0 +1,77 @@
+#ifndef _KALLSYMS_H
+#define _KALLSYMS_H
+
+#include <stdint.h>
+#include <stdbool.h>
+
+struct ksym_info {
+	/********in******/
+	char *modname;
+	char *symname;
+	/********out*****/
+	uint64_t value;
+};
+
+#define QUATE(x) #x
+#define INIT_MOD_SYM(MOD, SYM)				\
+	struct ksym_info _##MOD##_##SYM = {		\
+		QUATE(MOD), QUATE(SYM), 0		\
+	};						\
+	__attribute__((section(".init_ksyms"), used))	\
+	struct ksym_info * _ptr_##MOD##_##SYM = &_##MOD##_##SYM
+
+#define GET_MOD_SYM(MOD, SYM) (_##MOD##_##SYM.value)
+
+#define INIT_KERN_SYM(SYM) \
+	INIT_MOD_SYM(vmlinux, SYM)
+
+#define GET_KERN_SYM(SYM) GET_MOD_SYM(vmlinux, SYM)
+
+struct section_range {
+	char *start;
+	char *stop;
+};
+
+#define REGISTER_SECTION(T)						\
+bool register_##T##_section(char *start, char *stop)			\
+{									\
+	struct section_range *new_sr;					\
+	struct T##_info **p;						\
+	bool ret = false;						\
+									\
+	if (!start || !stop) {						\
+		fprintf(stderr, "%s: Invalid section start/stop\n",	\
+			__func__);					\
+		goto out;						\
+	}								\
+									\
+	for (p = (struct T##_info **)start;				\
+	     p < (struct T##_info **)stop;				\
+	     p++) {							\
+		if (!add_##T##_modname((*p)->modname))			\
+			goto out;					\
+	}								\
+									\
+	new_sr = malloc(sizeof(struct section_range));			\
+	if (!new_sr) {							\
+		fprintf(stderr, "%s: Not enough memory!\n", __func__);	\
+		goto out;						\
+	}								\
+	new_sr->start = start;						\
+	new_sr->stop = stop;						\
+	if (!add_to_arr((void ***)&sr, &sr_len, &sr_cap, new_sr)) {	\
+		free(new_sr);						\
+		goto out;						\
+	}								\
+	ret = true;							\
+out:									\
+	return ret;							\
+}
+
+bool add_to_arr(void ***arr, int *arr_len, int *arr_cap, void *elem);
+bool push_uniq_str(void ***arr, int *arr_len, int *arr_cap, char *str);
+bool check_ksyms_require_modname(char *modname, int *total);
+bool register_ksym_section(char *start, char *stop);
+bool read_vmcoreinfo_kallsyms(void);
+bool init_kernel_kallsyms(void);
+#endif /* _KALLSYMS_H */
