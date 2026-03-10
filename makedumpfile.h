@@ -2628,6 +2628,18 @@ is_zero_page(unsigned char *buf, long page_size)
 	return TRUE;
 }
 
+static inline int
+isSlab(unsigned long flags, unsigned int _mapcount)
+{
+	/* Linux 6.10 and later */
+	if (NUMBER(PAGE_SLAB_MAPCOUNT_VALUE) != NOT_FOUND_NUMBER) {
+		if (_mapcount == (int)NUMBER(PAGE_SLAB_MAPCOUNT_VALUE))
+			return TRUE;
+	}
+
+	return flags & (1UL << NUMBER(PG_slab));
+}
+
 void write_vmcoreinfo_data(void);
 int set_bit_on_1st_bitmap(mdf_pfn_t pfn, struct cycle *cycle);
 int clear_bit_on_1st_bitmap(mdf_pfn_t pfn, struct cycle *cycle);

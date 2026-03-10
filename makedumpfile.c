@@ -278,18 +278,6 @@ isHugetlb(unsigned long dtor)
 		   && (SYMBOL(free_huge_page) == dtor));
 }
 
-static inline int
-isSlab(unsigned long flags, unsigned int _mapcount)
-{
-	/* Linux 6.10 and later */
-	if (NUMBER(PAGE_SLAB_MAPCOUNT_VALUE) != NOT_FOUND_NUMBER) {
-		if (_mapcount == (int)NUMBER(PAGE_SLAB_MAPCOUNT_VALUE))
-			return TRUE;
-	}
-
-	return flags & (1UL << NUMBER(PG_slab));
-}
-
 static int
 isOffline(unsigned long flags, unsigned int _mapcount)
 {
