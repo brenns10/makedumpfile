@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include "kallsyms.h"
 #include "btf_info.h"
+#include "makedumpfile.h"
 
 /* Extension .so handlers array */
 static void **handlers = NULL;
@@ -17,6 +18,10 @@ static int handlers_cap = 0;
 static char **extension_opts = NULL;
 static int extension_opts_len = 0;
 static int extension_opts_cap = 0;
+
+static void **include_cbs = NULL;
+static int include_cbs_len = 0;
+static int include_cbs_cap = 0;
 
 static const char *dirs[] = {
 	"/usr/lib64/makedumpfile/extensions/",
@@ -66,10 +71,10 @@ static void load_extensions(void)
 {
 	char path[512];
 	int len, i, j;
-	void *handle;
+	void *handle, *include_cb;
 
 	for (i = 0; i < extension_opts_len; i++) {
-		handle = NULL;
+		handle = include_cb = NULL;
 		if (!extension_opts[i])
 			continue;
 		if ((len = strlen(extension_opts[i])) <= 3 ||
@@ -118,10 +123,21 @@ static void load_extensions(void)
 			continue;
 		}
 
+		include_cb = dlsym(handle, "include_page");
+		if (include_cb && !add_to_arr(&include_cbs, &include_cbs_len,
+					      &include_cbs_cap, include_cb)) {
+			fprintf(stderr, "%s: Failed to load %s include_page hook\n",
+				__func__, extension_opts[i]);
+			dlclose(handle);
+			continue;
+		}
+
 		if (!add_to_arr(&handlers, &handlers_len, &handlers_cap, handle)) {
 			fprintf(stderr, "%s: Failed to load %s\n", __func__,
 				extension_opts[i]);
 			dlclose(handle);
+			if (include_cb)
+				include_cbs_len--;
 			continue;
 		}
 		printf("Loaded extension: %s\n", path);
@@ -150,6 +166,16 @@ out:
 	return ret;
 }
 
+int extension_include_page(unsigned long pfn, const void *pcache)
+{
+	int i;
+
+	for (i = 0; i < include_cbs_len; i++)
+		if (((include_cb_f)include_cbs[i])(pfn, pcache))
+			return 1;
+	return 0;
+}
+
 void cleanup_extensions(void)
 {
 	for (int i = 0; i < handlers_len; i++) {
@@ -159,6 +185,10 @@ void cleanup_extensions(void)
 		free(handlers);
 	if (extension_opts)
 		free(extension_opts);
+	if (include_cbs)
+		free(include_cbs);
+	include_cbs = NULL;
+	include_cbs_cap = include_cbs_len = 0;
 	cleanup_kallsyms();
 	cleanup_btf();
 }

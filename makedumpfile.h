@@ -2786,4 +2786,20 @@ void add_extension_opts(char *opt);
 void init_extensions(void);
 void cleanup_extensions(void);
 
+/**
+ * Page inclusion callback. Called for all pages before any filtering has done,
+ * allowing an extension to override makedumpfile's decision by including it.
+ *
+ * Arguments:
+ *  - pfn: the page frame number of the page
+ *  - pcache: the cached struct page value
+ *
+ * Returns:
+ *  - 0 to defer to makedumpfile's normal filtering behavior
+ *  - 1 to include the page in the dump
+ */
+typedef int (*include_cb_f)(unsigned long pfn, const void *pcache);
+
+int extension_include_page(unsigned long pfn, const void *pcache);
+
 #endif /* MAKEDUMPFILE_H */
