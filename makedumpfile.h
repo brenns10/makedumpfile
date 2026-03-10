@@ -2780,4 +2780,10 @@ int dump_lockless_dmesg(void);
 unsigned long long memparse(char *ptr, char **retptr);
 void add_extension_opts(char *opt);
 
+/*
+ * Extensions for specifying custom page include/exclude behavior
+ */
+void init_extensions(void);
+void cleanup_extensions(void);
+
 #endif /* MAKEDUMPFILE_H */

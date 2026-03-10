@@ -62,12 +62,6 @@ out:
 	return ret;
 }
 
-static void cleanup_kallsyms_btf(void)
-{
-	cleanup_kallsyms();
-	cleanup_btf();
-}
-
 static void load_extensions(void)
 {
 	char path[512];
@@ -156,7 +150,7 @@ out:
 	return ret;
 }
 
-static void cleanup_extensions(void)
+void cleanup_extensions(void)
 {
 	for (int i = 0; i < handlers_len; i++) {
 		dlclose(handlers[i]);
@@ -165,9 +159,11 @@ static void cleanup_extensions(void)
 		free(handlers);
 	if (extension_opts)
 		free(extension_opts);
+	cleanup_kallsyms();
+	cleanup_btf();
 }
 
-void run_extensions(void)
+void init_extensions(void)
 {
 	/* Entry of extension execution */
 	void (*entry)(void);
@@ -181,10 +177,8 @@ void run_extensions(void)
 		entry = dlsym(handlers[i], "entry");
 		entry();
 	}
-	goto out;
+	return;
 fail:
 	fprintf(stderr, "%s: fail & skip all extensions\n", __func__);
-out:
-	cleanup_kallsyms_btf();
 	cleanup_extensions();
 }

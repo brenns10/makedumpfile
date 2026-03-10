@@ -10900,13 +10900,12 @@ create_dumpfile(void)
 	}
 
 	print_vtop();
+	init_extensions();
 
 	num_retry = 0;
 retry:
 	if (info->flag_refiltering)
 		update_dump_level();
-
-	run_extensions();
 
 	if ((info->name_filterconfig || info->name_eppic_config)
 			&& !gather_filter_info())
@@ -10945,6 +10944,7 @@ retry:
 	}
 	print_report();
 
+	cleanup_extensions();
 	clear_filter_info();
 	if (!close_files_for_creating_dumpfile())
 		return FALSE;
