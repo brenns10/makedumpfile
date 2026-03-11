@@ -11,19 +11,25 @@ static unsigned long mt_max[4] = {0};
 INIT_KERN_SYM(mt_slots);
 INIT_KERN_SYM(mt_pivots);
 
-INIT_KERN_STRUCT(maple_tree);
-INIT_KERN_STRUCT(maple_node);
-INIT_KERN_STRUCT_MEMBER(maple_tree, ma_root);
-INIT_KERN_STRUCT_MEMBER(maple_node, ma64);
-INIT_KERN_STRUCT_MEMBER(maple_node, mr64);
-INIT_KERN_STRUCT_MEMBER(maple_node, slot);
-INIT_KERN_STRUCT_MEMBER(maple_arange_64, pivot);
-INIT_KERN_STRUCT_MEMBER(maple_arange_64, slot);
-INIT_KERN_STRUCT_MEMBER(maple_range_64, pivot);
-INIT_KERN_STRUCT_MEMBER(maple_range_64, slot);
+/* Optional: update maple_init() to check for required fields */
+INIT_OPT_KERN_STRUCT(maple_tree);
+INIT_OPT_KERN_STRUCT(maple_node);
+INIT_OPT_KERN_STRUCT_MEMBER(maple_tree, ma_root);
+INIT_OPT_KERN_STRUCT_MEMBER(maple_node, ma64);
+INIT_OPT_KERN_STRUCT_MEMBER(maple_node, mr64);
+INIT_OPT_KERN_STRUCT_MEMBER(maple_node, slot);
+INIT_OPT_KERN_STRUCT_MEMBER(maple_arange_64, pivot);
+INIT_OPT_KERN_STRUCT_MEMBER(maple_arange_64, slot);
+INIT_OPT_KERN_STRUCT_MEMBER(maple_arange_64, meta);
+INIT_OPT_KERN_STRUCT_MEMBER(maple_range_64, pivot);
+INIT_OPT_KERN_STRUCT_MEMBER(maple_range_64, slot);
+INIT_OPT_KERN_STRUCT_MEMBER(maple_range_64, meta);
+INIT_OPT_KERN_STRUCT_MEMBER(maple_metadata, end);
 
 #define MEMBER_OFF(S, M) \
-	GET_KERN_STRUCT_MEMBER_MOFF(S, M) / 8
+	(GET_KERN_STRUCT_MEMBER_MOFF(S, M) / 8)
+
+#define HAVE_MEMBER(S, M) (GET_KERN_STRUCT_MEMBER_MSIZE(S, M) != 0)
 
 #define MAPLE_BUFSIZE			512
 
@@ -280,6 +286,22 @@ bool maple_init(void)
 		printf("MAPLE_BUFSIZE should be larger than maple_node/tree struct\n");
 		return false;
 	}
+	if (!GET_KERN_STRUCT_SSIZE(maple_tree) ||
+	    !GET_KERN_STRUCT_SSIZE(maple_node) ||
+	    !HAVE_MEMBER(maple_tree, ma_root) ||
+	    !HAVE_MEMBER(maple_node, ma64) ||
+	    !HAVE_MEMBER(maple_node, mr64) ||
+	    !HAVE_MEMBER(maple_node, slot) ||
+	    !HAVE_MEMBER(maple_arange_64, pivot) ||
+	    !HAVE_MEMBER(maple_arange_64, slot) ||
+	    !HAVE_MEMBER(maple_arange_64, meta) ||
+	    !HAVE_MEMBER(maple_range_64, pivot) ||
+	    !HAVE_MEMBER(maple_range_64, slot) ||
+	    !HAVE_MEMBER(maple_range_64, meta) ||
+	    !HAVE_MEMBER(maple_metadata, end)) {
+		printf("Missing required maple tree struct offset\n");
+		return false;
+	}
 
 	readmem(VADDR, mt_slots_ptr, mt_slots, sizeof(mt_slots));
 	readmem(VADDR, mt_pivots_ptr, mt_pivots, sizeof(mt_pivots));
@@ -290,4 +312,72 @@ bool maple_init(void)
 	mt_max[maple_arange_64_enum]       = ULONG_MAX;
 
 	return true;
+}
+
+unsigned long find_vma_mtree(unsigned long mt, unsigned long index)
+{
+	unsigned long long entry;
+
+	if (!readmem(VADDR, mt + MEMBER_OFF(maple_tree, ma_root), &entry, sizeof(entry)))
+		return 0;
+
+	if (!xa_is_node(entry)) {
+		if (index == 0)
+			return entry;
+		else
+			return 0;
+	}
+	unsigned long long max = ULONGLONG_MAX;
+	void *node = malloc(GET_KERN_STRUCT_SSIZE(maple_node));
+	if (!node)
+		return 0;
+
+	for (;;) {
+		if (!readmem(VADDR, entry & ~MAPLE_NODE_MASK, node, GET_KERN_STRUCT_SSIZE(maple_node))) {
+			free(node);
+			return 0;
+		}
+
+		int node_type = (entry >> MAPLE_NODE_TYPE_SHIFT) & MAPLE_NODE_TYPE_MASK;
+		unsigned long long *pivot, *slot;
+		uint8_t end;
+		if (node_type == 3) {
+			pivot = node + MEMBER_OFF(maple_arange_64, pivot);
+			slot = node + MEMBER_OFF(maple_arange_64, slot);
+			end = ((uint8_t *)node)[MEMBER_OFF(maple_arange_64, meta) + MEMBER_OFF(maple_metadata, end)];
+		} else if (node_type == 1 || node_type == 2) {
+			pivot = node + MEMBER_OFF(maple_range_64, pivot);
+			slot = node + MEMBER_OFF(maple_range_64, slot);
+			unsigned long long p = *(slot - 1);
+			if (!p)
+				end = ((uint8_t *)node)[MEMBER_OFF(maple_range_64, meta) + MEMBER_OFF(maple_metadata, end)];
+			else {
+				end = (slot - pivot) / sizeof(pivot);
+				if (p == max)
+					end--;
+			}
+		} else {
+			ERRMSG("unrecognized maple node type: %d\n", node_type);
+			free(node);
+			return 0;
+		}
+		int offset = 0;
+		for (offset = 0; offset < end; offset++) {
+			if (pivot[offset] >= index) {
+				max = pivot[offset];
+				break;
+			}
+		}
+		if (&pivot[offset] >= slot)
+			offset = end;
+
+		entry = slot[offset];
+		if (node_type == 1) {
+			// leaf:
+			free(node);
+			if (entry == XA_ZERO_ENTRY)
+				return 0;
+			return entry;
+		}
+	}
 }
