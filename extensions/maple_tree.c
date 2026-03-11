@@ -19,11 +19,14 @@ INIT_OPT_KERN_STRUCT_MEMBER(maple_node, mr64);
 INIT_OPT_KERN_STRUCT_MEMBER(maple_node, slot);
 INIT_OPT_KERN_STRUCT_MEMBER(maple_arange_64, pivot);
 INIT_OPT_KERN_STRUCT_MEMBER(maple_arange_64, slot);
+INIT_OPT_KERN_STRUCT_MEMBER(maple_arange_64, meta);
 INIT_OPT_KERN_STRUCT_MEMBER(maple_range_64, pivot);
 INIT_OPT_KERN_STRUCT_MEMBER(maple_range_64, slot);
+INIT_OPT_KERN_STRUCT_MEMBER(maple_range_64, meta);
+INIT_OPT_KERN_STRUCT_MEMBER(maple_metadata, end);
 
 #define MEMBER_OFF(S, M) \
-	GET_KERN_STRUCT_MEMBER_MOFF(S, M) / 8
+	(GET_KERN_STRUCT_MEMBER_MOFF(S, M) / 8)
 
 #define MAPLE_BUFSIZE			512
 
@@ -278,8 +281,11 @@ bool maple_init(void)
 	    !KERN_STRUCT_MEMBER_EXIST(maple_node, slot) ||
 	    !KERN_STRUCT_MEMBER_EXIST(maple_arange_64, pivot) ||
 	    !KERN_STRUCT_MEMBER_EXIST(maple_arange_64, slot) ||
+	    !KERN_STRUCT_MEMBER_EXIST(maple_arange_64, meta) ||
 	    !KERN_STRUCT_MEMBER_EXIST(maple_range_64, pivot) ||
-	    !KERN_STRUCT_MEMBER_EXIST(maple_range_64, slot)) {
+	    !KERN_STRUCT_MEMBER_EXIST(maple_range_64, slot) ||
+	    !KERN_STRUCT_MEMBER_EXIST(maple_range_64, meta) ||
+	    !KERN_STRUCT_MEMBER_EXIST(maple_metadata, end)) {
 		printf("%s: Missing required maple tree syms/types\n",
 			__func__);
 		return false;
@@ -304,4 +310,72 @@ bool maple_init(void)
 	mt_max[maple_arange_64_enum]       = ULONG_MAX;
 
 	return true;
+}
+
+unsigned long find_vma_mtree(unsigned long mt, unsigned long index)
+{
+	unsigned long long entry;
+
+	if (!readmem(VADDR, mt + MEMBER_OFF(maple_tree, ma_root), &entry, sizeof(entry)))
+		return 0;
+
+	if (!xa_is_node(entry)) {
+		if (index == 0)
+			return entry;
+		else
+			return 0;
+	}
+	unsigned long long max = ULONGLONG_MAX;
+	void *node = malloc(GET_KERN_STRUCT_SSIZE(maple_node));
+	if (!node)
+		return 0;
+
+	for (;;) {
+		if (!readmem(VADDR, entry & ~MAPLE_NODE_MASK, node, GET_KERN_STRUCT_SSIZE(maple_node))) {
+			free(node);
+			return 0;
+		}
+
+		int node_type = (entry >> MAPLE_NODE_TYPE_SHIFT) & MAPLE_NODE_TYPE_MASK;
+		unsigned long long *pivot, *slot;
+		uint8_t end;
+		if (node_type == 3) {
+			pivot = node + MEMBER_OFF(maple_arange_64, pivot);
+			slot = node + MEMBER_OFF(maple_arange_64, slot);
+			end = ((uint8_t *)node)[MEMBER_OFF(maple_arange_64, meta) + MEMBER_OFF(maple_metadata, end)];
+		} else if (node_type == 1 || node_type == 2) {
+			pivot = node + MEMBER_OFF(maple_range_64, pivot);
+			slot = node + MEMBER_OFF(maple_range_64, slot);
+			unsigned long long p = *(slot - 1);
+			if (!p)
+				end = ((uint8_t *)node)[MEMBER_OFF(maple_range_64, meta) + MEMBER_OFF(maple_metadata, end)];
+			else {
+				end = (slot - pivot) / sizeof(pivot);
+				if (p == max)
+					end--;
+			}
+		} else {
+			ERRMSG("unrecognized maple node type: %d\n", node_type);
+			free(node);
+			return 0;
+		}
+		int offset = 0;
+		for (offset = 0; offset < end; offset++) {
+			if (pivot[offset] >= index) {
+				max = pivot[offset];
+				break;
+			}
+		}
+		if (&pivot[offset] >= slot)
+			offset = end;
+
+		entry = slot[offset];
+		if (node_type == 1) {
+			// leaf:
+			free(node);
+			if (entry == XA_ZERO_ENTRY)
+				return 0;
+			return entry;
+		}
+	}
 }
