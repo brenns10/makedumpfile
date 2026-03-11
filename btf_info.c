@@ -137,10 +137,11 @@ static bool get_ktype_info(struct ktype_info *ki, char *mod_to_resolve)
 				if (ki->member_name != NULL) {
 					/* Retrieve member info */
 					if (!find_member_recursive(btf_arr[i]->btf,
-								   j, 0, ki)) {
-						fprintf(stderr, "%s: Not find member %s in %s\n",
+								   j, 0, ki) &&
+					    ki->member_required) {
+						fprintf(stderr, "%s: Required member %s not found in %s\n",
 							__func__, ki->member_name,
-							ki->struct_name);						
+							ki->struct_name);
 						return false;
 					}
 				}
@@ -149,9 +150,10 @@ static bool get_ktype_info(struct ktype_info *ki, char *mod_to_resolve)
 			}
 		}
 		if (j >= btf__type_cnt(btf_arr[i]->btf)) {
-			fprintf(stderr, "%s: Not find struct/union %s in %s\n",
-				__func__, ki->struct_name, ki->modname);						
-			return false;			
+			if (ki->struct_required)
+				fprintf(stderr, "%s: Required struct/union %s not found in %s\n",
+					__func__, ki->struct_name, ki->modname);
+			return !ki->struct_required;
 		}
 	}
 
