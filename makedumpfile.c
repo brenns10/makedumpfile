@@ -106,6 +106,7 @@ mdf_pfn_t pfn_elf_excluded;
 mdf_pfn_t pfn_extension;
 
 mdf_pfn_t num_dumped;
+mdf_pfn_t num_extension_retained;
 
 int retcd = FAILED;	/* return code */
 
@@ -6638,8 +6639,6 @@ check_order:
 		 * makedumpfile extensions
 		 */
 		filter_pg = run_extension_callback(pfn, pcache, &i);
-		if (filter_pg == PG_INCLUDE)
-			continue;
 
 		/*
 		 * Exclude the free page managed by a buddy
@@ -6721,6 +6720,13 @@ check_order:
 		 */
 		else
 			continue;
+
+		if (filter_pg == PG_INCLUDE) {
+			/* Account pages which would have been excluded, but were
+			 * retained by an extension. */
+			num_extension_retained += nr_pages;
+			continue;
+		}
 
 		/*
 		 * Execute exclusion
@@ -8265,6 +8271,7 @@ write_elf_pages_cyclic(struct cache_data *cd_header, struct cache_data *cd_page)
 	if (info->flag_cyclic) {
 		pfn_zero = pfn_cache = pfn_cache_private = 0;
 		pfn_user = pfn_free = pfn_hwpoison = pfn_offline = pfn_extension = 0;
+		num_extension_retained = 0;
 		pfn_memhole = info->max_mapnr;
 	}
 
@@ -9610,6 +9617,7 @@ write_kdump_pages_and_bitmap_cyclic(struct cache_data *cd_header, struct cache_d
 		 */
 		pfn_zero = pfn_cache = pfn_cache_private = 0;
 		pfn_user = pfn_free = pfn_hwpoison = pfn_offline = pfn_extension = 0;
+		num_extension_retained = 0;
 		pfn_memhole = info->max_mapnr;
 
 		/*
@@ -10575,6 +10583,7 @@ print_report(void)
 	REPORT_MSG("    Hwpoison pages          : 0x%016llx\n", pfn_hwpoison);
 	REPORT_MSG("    Offline pages           : 0x%016llx\n", pfn_offline);
 	REPORT_MSG("    Extension filter pages  : 0x%016llx\n", pfn_extension);
+	REPORT_MSG("  Retained by extension     : 0x%016llx\n", num_extension_retained);
 	REPORT_MSG("  Remaining pages  : 0x%016llx\n",
 	    pfn_original - pfn_excluded);
 
