@@ -6543,14 +6543,6 @@ __exclude_unnecessary_pages(unsigned long mem_map,
 			pfn_read_end   = pfn + pfn_mm - 1;
 		}
 
-		/*
-		 * Include pages that specified by user via
-		 * makedumpfile extensions
-		 */
-		filter_pg = run_extension_callback(pfn, pcache);
-		if (filter_pg == PG_INCLUDE)
-			continue;
-
 		flags   = ULONG(pcache + OFFSET(page.flags));
 		_count  = UINT(pcache + OFFSET(page._refcount));
 		mapping = ULONG(pcache + OFFSET(page.mapping));
@@ -6632,6 +6624,14 @@ check_order:
 
 		nr_pages = 1 << compound_order;
 		pfn_counter = NULL;
+
+		/*
+		 * Include pages that specified by user via
+		 * makedumpfile extensions
+		 */
+		filter_pg = run_extension_callback(pfn, pcache);
+		if (filter_pg == PG_INCLUDE)
+			continue;
 
 		/*
 		 * Excludable compound tail pages must have already been excluded by
