@@ -106,6 +106,7 @@ mdf_pfn_t pfn_elf_excluded;
 mdf_pfn_t pfn_extension;
 
 mdf_pfn_t num_dumped;
+mdf_pfn_t num_extension_retained;
 
 int retcd = FAILED;	/* return code */
 
@@ -6589,6 +6590,7 @@ check_order:
 			    && last_pfn_counter
 			    && set_bit_on_2nd_bitmap_for_kernel(pfn, cycle)) {
 				*last_pfn_counter -= 1;
+				num_extension_retained += 1;
 			} else if (filter_pg == PG_EXCLUDE
 				   && pfn >= last_exclusion_end
 				   && clear_bit_on_2nd_bitmap_for_kernel(pfn, cycle)) {
@@ -6688,6 +6690,7 @@ check_order:
 		 * compound sub-pages for now).
 		 */
 		if (filter_pg == PG_INCLUDE) {
+			num_extension_retained += 1;
 			if (nr_pages == 1)
 				continue;
 			exclude_range(pfn_counter, pfn + 1, pfn + nr_pages, cycle);
@@ -8235,6 +8238,7 @@ write_elf_pages_cyclic(struct cache_data *cd_header, struct cache_data *cd_page)
 	if (info->flag_cyclic) {
 		pfn_zero = pfn_cache = pfn_cache_private = 0;
 		pfn_user = pfn_free = pfn_hwpoison = pfn_offline = pfn_extension = 0;
+		num_extension_retained = 0;
 		pfn_memhole = info->max_mapnr;
 	}
 
@@ -9580,6 +9584,7 @@ write_kdump_pages_and_bitmap_cyclic(struct cache_data *cd_header, struct cache_d
 		 */
 		pfn_zero = pfn_cache = pfn_cache_private = 0;
 		pfn_user = pfn_free = pfn_hwpoison = pfn_offline = pfn_extension = 0;
+		num_extension_retained = 0;
 		pfn_memhole = info->max_mapnr;
 
 		/*
@@ -10547,6 +10552,8 @@ print_report(void)
 	REPORT_MSG("    Extension filter pages  : 0x%016llx\n", pfn_extension);
 	REPORT_MSG("  Remaining pages  : 0x%016llx\n",
 	    pfn_original - pfn_excluded);
+	REPORT_MSG("    Retained by extension   : 0x%016llx\n",
+		   num_extension_retained);
 
 	if (info->flag_elf_dumpfile) {
 		REPORT_MSG("     in ELF format : 0x%016llx\n",
