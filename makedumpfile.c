@@ -6400,8 +6400,8 @@ __exclude_unnecessary_pages(unsigned long mem_map,
     mdf_pfn_t pfn_start, mdf_pfn_t pfn_end, struct cycle *cycle)
 {
 	mdf_pfn_t pfn;
-	mdf_pfn_t *pfn_counter;
-	mdf_pfn_t nr_pages;
+	mdf_pfn_t *pfn_counter, *last_pfn_counter;
+	mdf_pfn_t nr_pages, last_exclusion_end;
 	unsigned long index_pg, pfn_mm;
 	unsigned long long maddr;
 	mdf_pfn_t pfn_read_start, pfn_read_end;
@@ -6413,17 +6413,21 @@ __exclude_unnecessary_pages(unsigned long mem_map,
 
 	i._mapcount = i.compound_order = 0;
 	i.private = i.compound_dtor = i.compound_head = 0;
+	last_exclusion_end = 0;
+	last_pfn_counter = NULL;
 
 	/*
-	 * If a multi-page exclusion is pending, do it first
+	 * If a multi-page exclusion is pending, do it first. However, do not
+	 * skip processing the excluded pages in the loop, since extensions may
+	 * want to re-include some sub-pages.
 	 */
 	if (cycle && cycle->exclude_pfn_start < cycle->exclude_pfn_end) {
 		exclude_range(cycle->exclude_pfn_counter,
 			cycle->exclude_pfn_start, cycle->exclude_pfn_end,
 			cycle);
 
-		mem_map += (cycle->exclude_pfn_end - pfn_start) * SIZE(page);
-		pfn_start = cycle->exclude_pfn_end;
+		last_pfn_counter = cycle->exclude_pfn_counter;
+		last_exclusion_end = cycle->exclude_pfn_end;
 	}
 
 	/*
@@ -6572,14 +6576,24 @@ check_order:
 		 * makedumpfile extensions
 		 */
 		filter_pg = run_extension_callback(pfn, pcache, &i);
-		if (filter_pg == PG_INCLUDE)
-			continue;
 
 		/*
-		 * Excludable compound tail pages must have already been excluded by
-		 * exclude_range(), don't need to check them here.
+		 * Compound tail pages are normally excluded by exclude_range()
+		 * and don't need extra processing. But if extensions return a
+		 * filter decision for the tail page, we may need to adjust the
+		 * previous decision.
 		 */
-		if (i.compound_head & 1) {
+		if ((i.compound_head & 1) || pfn < last_exclusion_end) {
+			if (filter_pg == PG_INCLUDE
+			    && pfn < last_exclusion_end
+			    && last_pfn_counter
+			    && set_bit_on_2nd_bitmap_for_kernel(pfn, cycle)) {
+				*last_pfn_counter -= 1;
+			} else if (filter_pg == PG_EXCLUDE
+				   && pfn >= last_exclusion_end
+				   && clear_bit_on_2nd_bitmap_for_kernel(pfn, cycle)) {
+				pfn_extension += 1;
+			}
 			continue;
 		}
 		/*
@@ -6651,7 +6665,8 @@ check_order:
 		}
 		/*
 		 * Exclude pages that specified by user via
-		 * makedumpfile extensions
+		 * makedumpfile extensions. The extension excludes
+		 * just the sub-page, not the entire compound page.
 		 */
 		else if (filter_pg == PG_EXCLUDE) {
 			nr_pages = 1;
@@ -6663,6 +6678,22 @@ check_order:
 		else
 			continue;
 
+		last_pfn_counter = pfn_counter;
+		last_exclusion_end = pfn + nr_pages;
+
+		/*
+		 * We're excluding the (potentially compound) page, but if the
+		 * extension decides to include the head page, we should rescue
+		 * that page only (keeping the exclusion for the rest of the
+		 * compound sub-pages for now).
+		 */
+		if (filter_pg == PG_INCLUDE) {
+			if (nr_pages == 1)
+				continue;
+			exclude_range(pfn_counter, pfn + 1, pfn + nr_pages, cycle);
+			continue;
+		}
+
 		/*
 		 * Execute exclusion
 		 */
@@ -6671,8 +6702,6 @@ check_order:
 				(*pfn_counter)++;
 		} else {
 			exclude_range(pfn_counter, pfn, pfn + nr_pages, cycle);
-			pfn += nr_pages - 1;
-			mem_map += (nr_pages - 1) * SIZE(page);
 		}
 	}
 
