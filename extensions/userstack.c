@@ -16,6 +16,7 @@
 #include "../kallsyms.h"
 #include "vma_mtree.h"
 #include "vma_rbtree.h"
+#include "list.h"
 
 /* Required struct fields */
 INIT_MOD_STRUCT_MEMBER(vmlinux, task_struct, tasks);
@@ -28,6 +29,7 @@ INIT_MOD_STRUCT_MEMBER(vmlinux, vm_area_struct, vm_pgoff);
 INIT_MOD_STRUCT_MEMBER(vmlinux, page, index);
 INIT_MOD_STRUCT_MEMBER(vmlinux, signal_struct, thread_head);
 INIT_MOD_STRUCT_MEMBER(vmlinux, list_head, next);
+INIT_MOD_STRUCT_MEMBER(vmlinux, list_head, prev);
 INIT_MOD_STRUCT_MEMBER(vmlinux, pt_regs, sp);
 INIT_MOD_STRUCT(vmlinux, pt_regs);
 
@@ -55,36 +57,41 @@ bool ready;
 
 static int for_each_task(bool (*task_fn)(unsigned long))
 {
-	unsigned long curr_proc = GET_MOD_SYM(vmlinux, init_task);
-	do {
+	unsigned long curr_proc;
+
+	// NOTE: this explicitly skips "init_task" because it treats it as the
+	// head of the list. This is fine: init_task is a kernel thread, so
+	// never has a stack to retain.
+	list_for_each_entry(curr_proc,
+			    GET_MOD_SYM(vmlinux, init_task) + MEMBER_OFF(task_struct, tasks),
+			    MEMBER_OFF(task_struct, tasks)) {
+		unsigned long mm;
+		if (!readmem(VADDR, curr_proc + MEMBER_OFF(task_struct, mm),
+			     &mm, sizeof(mm))) {
+			ERRMSG("error: failed to read task.mm\n");
+		}
+		if (!mm)
+			continue;
+
 		unsigned long signal;
 		if (!readmem(VADDR, curr_proc + MEMBER_OFF(task_struct, signal),
-			     &signal, sizeof(signal)))
-			return FALSE;
-
-		unsigned long thread_head = signal + MEMBER_OFF(signal_struct, thread_head);
-		unsigned long next;
-		if (!readmem(VADDR, thread_head + MEMBER_OFF(list_head, next), &next, sizeof(next)))
-			return FALSE;
-
-		while (next != thread_head) {
-			unsigned long curr_thread = next - MEMBER_OFF(task_struct, thread_node);
-
-			if (!task_fn(curr_thread))
-				return FALSE;
-
-			if (!readmem(VADDR,
-				     curr_thread + MEMBER_OFF(task_struct, thread_node) + MEMBER_OFF(list_head, next),
-				     &next, sizeof(next)))
-				return FALSE;
+			     &signal, sizeof(signal))) {
+			ERRMSG("error: failed to read task.signal\n");
+			break;
 		}
 
-		if (!readmem(VADDR, curr_proc + MEMBER_OFF(task_struct, tasks) + MEMBER_OFF(list_head, next),
-			     &next, sizeof(next)))
-			return FALSE;
-		curr_proc = next - MEMBER_OFF(task_struct, tasks);
-
-	} while (curr_proc != GET_MOD_SYM(vmlinux, init_task));
+		unsigned long curr_thread;
+		list_for_each_entry(curr_thread,
+				    signal + MEMBER_OFF(signal_struct, thread_head),
+				    MEMBER_OFF(task_struct, thread_node)) {
+			if (!task_fn(curr_thread))
+				return FALSE;
+		}
+		if (LIST_ERR(curr_thread))
+			return list_iterator_errmsg(curr_thread, "iterating thread list");
+	}
+	if (LIST_ERR(curr_proc))
+		return list_iterator_errmsg(curr_proc, "iterating task list");
 
 	return TRUE;
 }
