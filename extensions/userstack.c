@@ -285,7 +285,7 @@ void extension_init(void)
 static int count_retained;
 static int count_checked;
 static int count_cached;
-int extension_callback_compound_head(unsigned long pfn, const void *pcache, const struct pginfo *i)
+int include_user_stacks(unsigned long pfn, const void *pcache, const struct pginfo *i)
 {
 	unsigned long index;
 	static struct {
@@ -322,34 +322,7 @@ int extension_callback_compound_head(unsigned long pfn, const void *pcache, cons
 	}
 }
 
-/*
- * Extensions are called for each PFN. This means that we are called for each
- * sub-page of a compound page. This function can be used to cache the decision
- * made for a compound head, ensuring we do not call the callback for tail
- * pages.
- */
-int extension_callback(unsigned long pfn, const void *pcache, const struct pginfo *i)
-{
-	static int cached_decision = PG_UNDECID;
-	static mdf_pfn_t cached_pfn_end = 0;
-
-	if (i->compound_head & 1) {
-		/* TAIL PAGE! Return cached decision. */
-		if (pfn < cached_pfn_end)
-			return cached_decision;
-
-		static bool warned_missed_compound_head = false;
-		if (!warned_missed_compound_head) {
-			ERRMSG("warning: saw compound tail but not corresponding head (PFN %lu).\n", pfn);
-			warned_missed_compound_head = true;
-		}
-		return PG_UNDECID;
-	}
-
-	cached_pfn_end = pfn + (1 << i->compound_order);
-	cached_decision = extension_callback_compound_head(pfn, pcache, i);
-	return cached_decision;
-}
+EXTENSION_CALLBACK_COMPOUND_HEAD(include_user_stacks);
 
 __attribute__((destructor))
 static void userstack_exit(void) {
