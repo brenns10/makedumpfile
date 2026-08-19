@@ -128,8 +128,20 @@ static struct task_stack *stacks;
 static size_t stacks_count;
 static size_t stacks_alloc;
 
+// Avoid using too much memory when processing an especially large vmcore, or in
+// the case of a bug that causes us to create too many entries. 1M threads
+// requires 24 MiB of memory to track. While it's not the maximum amount we
+// could see, by a long shot, it's enough where most common workloads won't hit
+// it, and any more than this will make it far more likely that the dump will
+// hit an OOM issue.
+#define MAX_TASK_STACKS (1LU << 20) /* 1M * 24 bytes = 24 MiB */
+
 static bool append_task_stack(struct task_stack *newstack)
 {
+	if (stacks_count >= MAX_TASK_STACKS) {
+		ERRMSG("userstack error: hit maximum stack count %lu, aborting collection\n", MAX_TASK_STACKS);
+		goto fail;
+	}
 	if (stacks_count == stacks_alloc) {
 		if (stacks_alloc)
 			stacks_alloc *= 2;
@@ -137,12 +149,19 @@ static bool append_task_stack(struct task_stack *newstack)
 			stacks_alloc = 512;
 		struct task_stack *newarr = realloc(stacks, stacks_alloc * sizeof(stacks[0]));
 		if (!newarr) {
-			return FALSE;
+			ERRMSG("userstack: allocation error for stack tracking (size %lu)\n", stacks_alloc);
+			goto fail;
 		}
 		stacks = newarr;
 	}
 	stacks[stacks_count++] = *newstack;
 	return TRUE;
+
+fail:
+	free(stacks);
+	stacks = NULL;
+	stacks_count = stacks_alloc = 0;
+	return FALSE;
 }
 
 static bool record_task_stack(unsigned long taskp)
